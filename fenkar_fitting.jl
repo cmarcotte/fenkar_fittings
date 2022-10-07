@@ -31,6 +31,7 @@ init();
 const modelfile	= false
 const stimfile	= false
 const sigdigs	= 5
+const skipPars  = 0
 
 # make the parameters for the solution
 const Nt = 500
@@ -163,6 +164,10 @@ end
 # get known parameters and form deflation operator
 const PP = knownParameters();
 M = deflationOperator(PP);
+if isinteger(skipPars) && 1 <= skipPars && skipPars <= length(PP)
+	QQ = view(PP, vcat(1:(skipPars-1),(skipPars+1):length(PP)))
+	M = deflationOperator(QQ);
+end
 
 # define loss function
 function loss(θ, _p; ensemble=EnsembleThreads())
