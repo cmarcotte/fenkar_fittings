@@ -5,6 +5,7 @@ using ForwardDiff
 using Optimization, OptimizationNLopt
 using Random, DelimitedFiles
 using PyPlot
+using Dierckx
 plt.style.use("seaborn-paper")
 PyPlot.rc("font", family="serif")
 PyPlot.rc("text", usetex=true)
@@ -140,6 +141,44 @@ function plotFits(θ,sol; target=target)
 	return fig, axs
 end
 
+function analyzeTraces(sol; target=target)
+	fig, axs = plt.subplots(1, 3, figsize=(dw,dw), sharex="row", sharey="col", constrained_layout=true);
+	for n in 1:Nsols
+		tAPD, tDI, tAPA = analyzeTrace(t, target[1,:,n][:]);
+		APD, DI, APA = analyzeTrace(t, sol[1,:,n][:]);
+		axs[1].plot(BCLs[n]*ones(Float64, length(tAPD)), tAPD, ".k", markersize=4)
+		axs[1].plot(BCLs[n]*ones(Float64, length(APD)), APD, ".C0", markersize=2)
+		axs[2].plot(BCLs[n]*ones(Float64, length(tDI)), tDI, ".k", markersize=4)
+		axs[2].plot(BCLs[n]*ones(Float64, length(DI)), DI, ".C0", markersize=2)
+		axs[3].plot(BCLs[n]*ones(Float64, length(tAPA)), tAPA, ".k", markersize=4)
+		axs[3].plot(BCLs[n]*ones(Float64, length(APA)), APA, ".C0", markersize=2)
+	end
+	return fig, axs
+end
+
+function analyzeTrace(t, V; V90=0.2)
+	dt = mean(diff(t))
+	Vt = Spline1D(t[:], V.-V90, k=3);
+	
+	R = roots(Vt; maxn=Int(5e3));	# time points R: V(R) == V90
+	D = derivative(Vt, R);			# V'(R)
+	
+	# storage for APD, DI, APA for this BCL
+	APD = Float64[]
+	DI  = Float64[]
+	APA = Float64[]
+	
+	for n in 1:length(R)-1
+		if D[n] > 0 && D[n+1] < 0
+			push!(APD, R[n+1]-R[n])
+			push!(APA, V90+maximum(Vt(R[n]:dt:R[n+1])))
+		elseif D[n] < 0 && D[n+1] > 0
+			push!(DI, R[n+1]-R[n])
+		end
+	end
+	return (APD, DI, APA)
+end
+
 # get known parameters and form deflation operator
 const PP = knownParameters();
 const LL = knownLosses();
@@ -157,6 +196,11 @@ function main()
 			print("Oddity; parameters $n: \tL=$(L), \tl=$(l).\n")
 		end
 	end
+	
+	fig, axs = analyzeTraces(sol; target=target);
+	plt.savefig("./fittings/BCLs.pdf",bbox_inches="tight")
+	plt.close(fig)
+	
 	return nothing
 end
 main()
