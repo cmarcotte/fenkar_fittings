@@ -1,4 +1,4 @@
-using DelimitedFiles, Plots, StatsBase, TSne
+using DelimitedFiles, Plots, StatsBase, TSne, UMAP
 
 function knownLosses()
 	LL = []
@@ -35,24 +35,17 @@ function knownParameters()
 	return PP
 end
 
-#=
-
-function UMAP()
-	# using UMAP
-	LL = knownLosses();
-	PP = knownParameters();
-	data = reduce(hcat, PP);
-	data = vcat(transpose(LL),data);
-	data = data[1:14,:];
-	data = Float64.(data);
-	embedding = umap(data, 2; n_neighbors=50 )
-	
-	theplot = scatter(embedding[1,:], embedding[2,:], zcolor=LL, marker=(:viridis, 5 .+ 5 .*sqrt.(LL./(500*62))), label="Loss")
-	savefig(theplot, "./fittings/UMAP.pdf")
-	
+function histos(data)
+	plts = []
+	pnames=["tsi", "tv1m", "tv2m", "tvp", "twm", "twp", "td", "to", "tr", "xk", "uc", "uv", "ucsi"]
+	for m in 1:13
+		push!(plts, scatter(data[m+1,:], data[1,:], 
+					marker = (:circle, 5, 0.3, stroke(0, 0, :black, :dot)), 
+					xlabel="$(pnames[m])", ylabel=(m%5==0 ? "Loss" : ""), legend=false, dpi=300));
+	end
+	allplts = plot(plts...; layout=(3,5), size=(1600,1000), link=:y, dpi=300)
+	savefig(allplts, "./fittings/histos.pdf")
 end
-
-=#
 
 function main()
 	LL = knownLosses();
@@ -61,12 +54,20 @@ function main()
 	data = reduce(hcat, PP);
 	data = vcat(transpose(LL),data); 
 	data = data[1:14,:];
-	data = collect(transpose(Float64.(data)));
+	data = Float64.(data);
 	
-	Y = tsne(data, 2, 0, 100000, 50)
-	
+	histos(data);
+		
+	Y = tsne(collect(transpose(data)), 2, 0, 20000, 50)
 	theplot = scatter(Y[:,1], Y[:,2], zcolor=LL, marker=(:viridis, 5 .+ 5 .*sqrt.(LL./(500*62))), label="Loss")
 	savefig(theplot, "./fittings/tSNE.pdf")
+	
+	## UMAP.jl seems to have a linker problem on Apple Silicon
+	#=
+	embedding = umap(data, 2; n_neighbors=50 )
+	theplot = scatter(embedding[1,:], embedding[2,:], zcolor=LL, marker=(:viridis, 5 .+ 5 .*sqrt.(LL./(500*62))), label="Loss")
+	savefig(theplot, "./fittings/UMAP.pdf")
+	=#
 	return nothing
 end
 

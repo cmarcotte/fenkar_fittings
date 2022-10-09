@@ -1,4 +1,4 @@
-for i in {1..400}; do
+for i in {1..300}; do
 	echo "${i}:\n"
 	if [[ $((i%10)) == 0 ]]; then
 		julia --project=. --threads=8 openAllFittings.jl
@@ -7,6 +7,6 @@ for i in {1..400}; do
 		#julia --project=. --threads=4 checkAllFittings.jl
 	else
 		julia --project=. --threads=8 fenkar_fitting.jl
-		echo "\n
+		echo "\n"
 	fi
 done
