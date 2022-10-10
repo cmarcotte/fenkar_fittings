@@ -4,8 +4,10 @@ using DifferentialEquations
 using ForwardDiff
 using Optimization, OptimizationNLopt
 using Random, DelimitedFiles
-using PyPlot
 using Dierckx
+using Statistics
+
+using PyPlot
 plt.style.use("seaborn-paper")
 PyPlot.rc("font", family="serif")
 PyPlot.rc("text", usetex=true)
@@ -15,6 +17,8 @@ PyPlot.matplotlib.rcParams["xtick.labelsize"] = 9
 PyPlot.matplotlib.rcParams["ytick.labelsize"] = 9
 const sw = 3.40457
 const dw = 7.05826
+
+#using Plots
 	
 # make the parameters for the solution
 const Nt = 500
@@ -27,39 +31,10 @@ const Nsols = 62
 const target = zeros(Float64, 1, Nt, Nsols);
 const t0s = zeros(Float64, Nsols);
 const BCLs = zeros(Float64, Nsols);
-try
-	target .= reshape(readdlm("./data/target.txt"), size(target));
-	t0s .= reshape(readdlm("./data/t0s.txt"), size(t0s));
-	BCLs .= reshape(readdlm("./data/BCLs.txt"), size(BCLs));
-catch
-	# get the data from the recordings
-	basePath = basepath = "../../Alessio_Data/2011-05-28_Rec78-103_Pace_Apex/"
-	inds = getPossibleIndices(basepath)
-	data = []
-	m = 0
-	for ind in inds, Vind in [1,2]
-		m = m+1
-		global t, tmp, BCL = getExpData(ind; Vind = Vind, tInds=1:Nt)
-		push!(data, tmp);
-		BCLs[m] = BCL;
-		t0s[m] = t[findfirst(tmp[1,:] .> 0.5)]-t[1]-BCL/2; 
-		# this implies Istim(t1)=(IA*sin(pi*(t1-t1-BCL/2)/BCL)^500) = IA*sin(pi/2)^500
-	end
 
-	# define target for optimization
-	target[1,:,:] .= transpose(reduce(vcat, data));
-	
-	# write target, t0s, and BCLs to caches
-	open("./data/target.txt", "w") do io
-		writedlm(io, target);
-	end
-	open("./data/t0s.txt", "w") do io
-		writedlm(io, t0s);
-	end
-	open("./data/BCLs.txt", "w") do io
-		writedlm(io, BCLs);
-	end
-end
+target .= reshape(readdlm("./data/target.txt"), size(target));
+t0s .= reshape(readdlm("./data/t0s.txt"), size(t0s));
+BCLs .= reshape(readdlm("./data/BCLs.txt"), size(BCLs));
 
 function knownLosses()
 	LL = []
@@ -124,7 +99,7 @@ function loss(θ, _p; ensemble=EnsembleThreads())
 end
 
 function plotFits(θ,sol; target=target)
-
+	
 	fig, axs = plt.subplots(Int(ceil(62/8)),8, figsize=(dw,dw*1.05*(Int(ceil(62/8))/8)), 
 				sharex=true, sharey=true, constrained_layout=true)
 	for n in 1:Nsols
@@ -138,22 +113,38 @@ function plotFits(θ,sol; target=target)
 	axs[1].set_xlim([0.0,1000.0])
 	axs[1].set_xticks([0.0,250.0,500.0,750.0,1000.0])
 	axs[1].set_xticklabels(["","250","","750",""])
-	return fig, axs
+	plt.savefig("./fittings/$n.pdf",bbox_inches="tight")
+	plt.close(fig)
+	
+	#=
+	plts = []
+	for n in 1:Nsols
+		nplt = plot();
+		# linear indexing into Array{Axis,2}
+		plot!(nplt, t, target[1,:,n], linecolor=:black, linewidth=4)
+		# plotting the (negated) stimulus current to make sure things line up
+		plot!(nplt, t, Istim.(t,-θ[13+5*(n-1)+3],θ[13+5*(n-1)+1],θ[13+5*(n-1)+2]), linecolor=:red, linewidth=1)
+		plot!(nplt, t, sol[1,:,n], linecolor=:orange, linewidth=2)
+		plot!(xticks=(0:250:1000,["","250","","750",""]),xlim=[0.0,1000.0],legend=false,ylim=[-0.1,1.1],size=(300,300))
+		push!(plts,nplt)
+	end
+	comboplt = plot(plts..., link=:all, layout=(8,8), size=(1000,1000))
+	=#
+	
+	return nothing
 end
 
-function analyzeTraces(sol; target=target)
-	fig, axs = plt.subplots(1, 3, figsize=(dw,dw), sharex="row", sharey="col", constrained_layout=true);
-	for n in 1:Nsols
-		tAPD, tDI, tAPA = analyzeTrace(t, target[1,:,n][:]);
-		APD, DI, APA = analyzeTrace(t, sol[1,:,n][:]);
-		axs[1].plot(BCLs[n]*ones(Float64, length(tAPD)), tAPD, ".k", markersize=4)
-		axs[1].plot(BCLs[n]*ones(Float64, length(APD)), APD, ".C0", markersize=2)
-		axs[2].plot(BCLs[n]*ones(Float64, length(tDI)), tDI, ".k", markersize=4)
-		axs[2].plot(BCLs[n]*ones(Float64, length(DI)), DI, ".C0", markersize=2)
-		axs[3].plot(BCLs[n]*ones(Float64, length(tAPA)), tAPA, ".k", markersize=4)
-		axs[3].plot(BCLs[n]*ones(Float64, length(APA)), APA, ".C0", markersize=2)
+function analyzeTraces(t, Vs)
+	APDs = [];
+	DIs  = [];
+	APAs = [];
+	for n in 1:size(Vs,3)
+		APD, DI, APA = analyzeTrace(t, Vs[1,:,n][:]);
+		push!(APDs, APD);
+		push!(DIs,   DI);
+		push!(APAs, APA);
 	end
-	return fig, axs
+	return (APDs, DIs, APAs)
 end
 
 function analyzeTrace(t, V; V90=0.2)
@@ -179,25 +170,43 @@ function analyzeTrace(t, V; V90=0.2)
 	return (APD, DI, APA)
 end
 
-# get known parameters and form deflation operator
-const PP = knownParameters();
-const LL = knownLosses();
-
 function main()
 	
+	# get known parameters and form deflation operator
+	PP = knownParameters();
+	LL = knownLosses();
+
+	fig, axs = plt.subplots(1, 3, figsize=(dw,sw), sharex="row", sharey="col", constrained_layout=true);
+	axs[1].set_xlabel("BCL [ms]")
+	axs[1].set_ylabel("APD [ms]")
+	axs[2].set_xlabel("BCL [ms]")
+	axs[2].set_ylabel("DI  [ms]")
+	axs[3].set_xlabel("BCL [ms]")
+	axs[3].set_ylabel("APA [  ]")
+	APDs, DIs, APAs = analyzeTraces(t, target);
+	for (BCL, APD, DI, APA) in zip(BCLs, APDs, DIs, APAs)
+		axs[1].plot(BCL*ones(Float64, length(APD)), APD, ".k", markersize=4)
+		axs[2].plot(BCL*ones(Float64, length(DI)),   DI, ".k", markersize=4)
+		axs[3].plot(BCL*ones(Float64, length(APA)), APA, ".k", markersize=4)
+	end
 	for (n,(P,L)) in enumerate(zip(PP,LL))
 		# get loss and solution for parameters P
 		l,sol = loss(P,SciMLBase.NullParameters()); 
-		fig, axs = plotFits(P,sol; target=target)
-		plt.savefig("./fittings/$n.pdf",bbox_inches="tight")
-		plt.close(fig)
+		#=
+		plotFits(P,sol; target=target);
 		
 		if l > 1.05*L
 			print("Oddity; parameters $n: \tL=$(L), \tl=$(l).\n")
 		end
+		=#
+		APDs, DIs, APAs = analyzeTraces(t, sol);
+		for (BCL, APD, DI, APA) in zip(BCLs, APDs, DIs, APAs)
+			axs[1].plot(BCL*ones(Float64, length(APD)), APD, ".C0", alpha=0.1, markersize=5)
+			axs[2].plot(BCL*ones(Float64, length(DI)),   DI, ".C0", alpha=0.1, markersize=5)
+			axs[3].plot(BCL*ones(Float64, length(APA)), APA, ".C0", alpha=0.1, markersize=5)
+		end
+		
 	end
-	
-	fig, axs = analyzeTraces(sol; target=target);
 	plt.savefig("./fittings/BCLs.pdf",bbox_inches="tight")
 	plt.close(fig)
 	
