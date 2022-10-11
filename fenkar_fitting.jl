@@ -34,7 +34,7 @@ const sigdigs	= 5
 const skipPars  = 0
 
 # make the parameters for the solution
-const Nt = 500
+const Nt = 1200
 const dt = 2.0			# time between samples -- set by the data
 const tspan = (0.0,Nt*dt)
 const t = collect(range(tspan[1], tspan[2]; length=Nt));
@@ -45,37 +45,11 @@ const target = zeros(Float64, 1, Nt, Nsols);
 const t0s = zeros(Float64, Nsols);
 const BCLs = zeros(Float64, Nsols);
 try
-	target .= reshape(readdlm("./data/target.txt"), size(target));
-	t0s .= reshape(readdlm("./data/t0s.txt"), size(t0s));
-	BCLs .= reshape(readdlm("./data/BCLs.txt"), size(BCLs));
+	target .= reshape(readdlm("./data/link/target.txt"), size(target));
+	t0s .= reshape(readdlm("./data/link/t0s.txt"), size(t0s));
+	BCLs .= reshape(readdlm("./data/link/BCLs.txt"), size(BCLs));
 catch
-	# get the data from the recordings
-	basePath = basepath = "../../Alessio_Data/2011-05-28_Rec78-103_Pace_Apex/"
-	inds = getPossibleIndices(basepath)
-	data = []
-	m = 0
-	for ind in inds, Vind in [1,2]
-		m = m+1
-		global t, tmp, BCL = getExpData(ind; Vind = Vind, tInds=1:Nt)
-		push!(data, tmp);
-		BCLs[m] = BCL;
-		t0s[m] = t[findfirst(tmp[1,:] .> 0.5)]-t[1]-BCL/2; 
-		# this implies Istim(t1)=(IA*sin(pi*(t1-t1-BCL/2)/BCL)^500) = IA*sin(pi/2)^500
-	end
-
-	# define target for optimization
-	target[1,:,:] .= transpose(reduce(vcat, data));
-	
-	# write target, t0s, and BCLs to caches
-	open("./data/target.txt", "w") do io
-		writedlm(io, target);
-	end
-	open("./data/t0s.txt", "w") do io
-		writedlm(io, t0s);
-	end
-	open("./data/BCLs.txt", "w") do io
-		writedlm(io, BCLs);
-	end
+	print("uh oh, spaghettios!\n")
 end
 
 function knownParameters()
@@ -85,7 +59,7 @@ function knownParameters()
 	while loading
 		try
 			ind = ind + 1
-			tmp = readdlm("./fittings/$(ind).txt"; comments=true, comment_char='#');
+			tmp = readdlm("./fittings/link/$(ind).txt"; comments=true, comment_char='#');
 			push!(PP, tmp[1,1:13][:])
 		catch
 			loading = false
@@ -96,7 +70,7 @@ function knownParameters()
 end
 
 function deflationOperator(PP; a=1.0)
-	M(P) = prod([a + 1.0./sum(abs2,P.-p) for p in PP])
+	M(P) = 1.0 #prod([a + 1.0./sum(abs2,P.-p) for p in PP])
 	return M
 end
 
@@ -131,10 +105,10 @@ for m in 1:62
 end
 if modelfile
 	# and write over from the file(s) if using those
-	P[1:13] .= transpose(readdlm("./fittings/model_params.txt"))[1:13];
+	P[1:13] .= transpose(readdlm("./fittings/link/model_params.txt"))[1:13];
 end
 if stimfile
-	P[14:length(P)] .= transpose(readdlm("./fittings/stim_params.txt"))[:];
+	P[14:length(P)] .= transpose(readdlm("./fittings/link/stim_params.txt"))[:];
 end
 # and then check lb/ub are valid
 li = findall(P .<= lb)
@@ -164,7 +138,7 @@ end
 # get known parameters and form deflation operator
 const PP = knownParameters();
 M = deflationOperator(PP);
-if isinteger(skipPars) && 1 <= skipPars && skipPars <= length(PP)
+if isinteger(skipPars) && 1 <= skipPars && skipPars <= length(PP) && length(PP) > 0
 	QQ = view(PP, vcat(1:(skipPars-1),(skipPars+1):length(PP)))
 	M = deflationOperator(QQ);
 end
@@ -198,9 +172,9 @@ function plotFits(θ,sol; target=target)
 		axs[n].plot(t, sol[1,:,n], "-C1", linewidth=1)
 	end
 	axs[1].set_ylim([-0.1,1.1])
-	axs[1].set_xlim([0.0,1000.0])
-	axs[1].set_xticks([0.0,250.0,500.0,750.0,1000.0])
-	axs[1].set_xticklabels(["","250","","750",""])
+	axs[1].set_xlim([t[begin],t[end]])
+	#axs[1].set_xticks([0.0,250.0,500.0,750.0,1000.0])
+	#axs[1].set_xticklabels(["","250","","750",""])
 	return fig, axs
 end
 
@@ -213,15 +187,15 @@ function saveprogress(ind,θ,l,sol; plotting=false)
 		write(io, "# t0\tTI\tIA\tv0\tw0\n")
 		writedlm(io, transpose(reshape(round.(θ[14:end],sigdigits=sigdigs-1), 5, :)))
 	end
-	open("./fittings/model_params.txt", "w") do io
+	open("./fittings/link/model_params.txt", "w") do io
 		writedlm(io, transpose(round.(θ[1:13],sigdigits=sigdigs)))
 	end
-	open("./fittings/stim_params.txt", "w") do io
+	open("./fittings/link/stim_params.txt", "w") do io
 		writedlm(io, transpose(reshape(round.(θ[14:end],sigdigits=sigdigs-1), 5, :)))
 	end
 	if plotting
 		fig, axs = plotFits(θ,sol)
-		fig.savefig("./fittings/all_fits.pdf",bbox_inches="tight")
+		fig.savefig("./fittings/link/all_fits.pdf",bbox_inches="tight")
 		plt.close(fig)
 		#=
 		# mysterious python error:
@@ -278,14 +252,14 @@ print("\n\tFinal loss: $(l); Initial loss: $(l1).\n")
 
 if sqrt(l/Nt/Nsols) < 0.15 # 15% error threshold contribution to RMS per time-step per ode
 	saveprogress(length(iter),result.u,l,sol; plotting=true)
-	open("./fittings/all_params.txt", "a") do io
+	open("./fittings/link/all_params.txt", "a") do io
 		write(io, "\n")
 		write(io, "# Loss (initial) = $(loss(P,nothing)[1])\n")
 		write(io, "# Loss (final) = $(loss(result.u,nothing)[1])\n")
 		Q = result.u; Q[1:13] .= P[1:13];	
 		write(io, "# Loss (resample) = $(loss(Q,nothing)[1])\n")
 	end
-	cp("./fittings/all_params.txt", "./fittings/$(length(PP)+1).txt");
+	cp("./fittings/link/all_params.txt", "./fittings/link/$(length(PP)+1).txt");
 else
 	print("\n l = $(l), RMS = $(sqrt(l/(Nt*Nsols))).\n");
 end

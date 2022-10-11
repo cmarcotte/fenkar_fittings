@@ -32,9 +32,9 @@ const target = zeros(Float64, 1, Nt, Nsols);
 const t0s = zeros(Float64, Nsols);
 const BCLs = zeros(Float64, Nsols);
 
-target .= reshape(readdlm("./data/target.txt"), size(target));
-t0s .= reshape(readdlm("./data/t0s.txt"), size(t0s));
-BCLs .= reshape(readdlm("./data/BCLs.txt"), size(BCLs));
+target .= reshape(readdlm("./data/link/target.txt"), size(target));
+t0s .= reshape(readdlm("./data/link/t0s.txt"), size(t0s));
+BCLs .= reshape(readdlm("./data/link/BCLs.txt"), size(BCLs));
 
 function knownLosses()
 	LL = []
@@ -43,7 +43,7 @@ function knownLosses()
 	while loading
 		try
 			ind = ind + 1
-			tmp = readdlm("./fittings/$(ind).txt");
+			tmp = readdlm("./fittings/link/$(ind).txt");
 			loss = Float64(tmp[1,4])
 			push!(LL, loss)
 		catch
@@ -62,7 +62,7 @@ function knownParameters()
 	while loading
 		try
 			ind = ind + 1
-			tmp = readdlm("./fittings/$(ind).txt"; comments=true, comment_char='#');
+			tmp = readdlm("./fittings/link/$(ind).txt"; comments=true, comment_char='#');
 			push!(PP, vcat(tmp[1,1:13][:],transpose(tmp[2:end,1:5])[:]))
 		catch
 			loading = false
@@ -113,7 +113,7 @@ function plotFits(θ,sol; target=target)
 	axs[1].set_xlim([0.0,1000.0])
 	axs[1].set_xticks([0.0,250.0,500.0,750.0,1000.0])
 	axs[1].set_xticklabels(["","250","","750",""])
-	plt.savefig("./fittings/$n.pdf",bbox_inches="tight")
+	plt.savefig("./fittings/link/$n.pdf",bbox_inches="tight")
 	plt.close(fig)
 	
 	#=
@@ -207,7 +207,7 @@ function main()
 		end
 		
 	end
-	plt.savefig("./fittings/BCLs.pdf",bbox_inches="tight")
+	plt.savefig("./fittings/link/BCLs.pdf",bbox_inches="tight")
 	plt.close(fig)
 	
 	return nothing

@@ -7,7 +7,7 @@ function knownLosses()
 	while loading
 		try
 			ind = ind + 1
-			tmp = readdlm("./fittings/$(ind).txt");
+			tmp = readdlm("./fittings/link/$(ind).txt");
 			loss = Float64(tmp[1,4])
 			push!(LL, loss)
 		catch
@@ -25,7 +25,7 @@ function knownParameters()
 	while loading
 		try
 			ind = ind + 1
-			tmp = readdlm("./fittings/$(ind).txt"; comments=true, comment_char='#');
+			tmp = readdlm("./fittings/link/$(ind).txt"; comments=true, comment_char='#');
 			push!(PP, vcat(tmp[1,1:13][:],transpose(tmp[2:end,1:5])[:]))
 		catch
 			loading = false
@@ -44,7 +44,7 @@ function distros(data, LL)
 					xlabel="$(pnames[m])", ylabel=(m%5==1 ? "Loss" : ""), legend=false, dpi=300));
 	end
 	allplts = plot(plts...; layout=(3,5), size=(1600,1000), link=:y, dpi=300)
-	savefig(allplts, "./fittings/distros.pdf")
+	savefig(allplts, "./fittings/link/distros.pdf")
 end
 
 function main()
@@ -59,12 +59,12 @@ function main()
 		
 	Y = tsne(collect(transpose(data)), 2, 0, 20000, 50)
 	theplot = scatter(Y[:,1], Y[:,2], zcolor=LL, marker=(:viridis, 5 .+ 5 .*sqrt.(LL./(500*62))), label="Loss")
-	savefig(theplot, "./fittings/tSNE.pdf")
+	savefig(theplot, "./fittings/link/tSNE.pdf")
 	
 	## UMAP.jl seems to have a linker problem on Apple Silicon
 	embedding = umap(data, 2; n_neighbors=50 )
 	theplot = scatter(embedding[1,:], embedding[2,:], zcolor=LL, marker=(:viridis, 5 .+ 5 .*sqrt.(LL./(500*62))), label="Loss")
-	savefig(theplot, "./fittings/UMAP.pdf")
+	savefig(theplot, "./fittings/link/UMAP.pdf")
 	
 	return nothing
 end
