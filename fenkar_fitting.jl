@@ -45,9 +45,9 @@ const target = zeros(Float64, 1, Nt, Nsols);
 const t0s = zeros(Float64, Nsols);
 const BCLs = zeros(Float64, Nsols);
 try
-	target .= reshape(readdlm("./data/link/target.txt"), size(target));
-	t0s .= reshape(readdlm("./data/link/t0s.txt"), size(t0s));
-	BCLs .= reshape(readdlm("./data/link/BCLs.txt"), size(BCLs));
+	target .= reshape(readdlm("./data/Nt_$(Nt)/target.txt"), size(target));
+	t0s .= reshape(readdlm("./data/Nt_$(Nt)/t0s.txt"), size(t0s));
+	BCLs .= reshape(readdlm("./data/Nt_$(Nt)/BCLs.txt"), size(BCLs));
 catch
 	print("uh oh, spaghettios!\n")
 end
@@ -59,7 +59,7 @@ function knownParameters()
 	while loading
 		try
 			ind = ind + 1
-			tmp = readdlm("./fittings/link/$(ind).txt"; comments=true, comment_char='#');
+			tmp = readdlm("./fittings/Nt_$(Nt)/$(ind).txt"; comments=true, comment_char='#');
 			push!(PP, tmp[1,1:13][:])
 		catch
 			loading = false
@@ -105,10 +105,10 @@ for m in 1:62
 end
 if modelfile
 	# and write over from the file(s) if using those
-	P[1:13] .= transpose(readdlm("./fittings/link/model_params.txt"))[1:13];
+	P[1:13] .= transpose(readdlm("./fittings/Nt_$(Nt)/model_params.txt"))[1:13];
 end
 if stimfile
-	P[14:length(P)] .= transpose(readdlm("./fittings/link/stim_params.txt"))[:];
+	P[14:length(P)] .= transpose(readdlm("./fittings/Nt_$(Nt)/stim_params.txt"))[:];
 end
 # and then check lb/ub are valid
 li = findall(P .<= lb)
@@ -179,7 +179,7 @@ function plotFits(θ,sol; target=target)
 end
 
 function saveprogress(ind,θ,l,sol; plotting=false)
-	open("./fittings/all_params.txt", "w") do io
+	open("./fittings/Nt_$(Nt)/all_params.txt", "w") do io
 		write(io, "# Loss = $(l)\n\n")
 		write(io, "# tsi\ttv1m\ttv2m\ttvp\ttwm\ttwp\ttd\tto\ttr\txk\tuc\tuv\tucsi\n")
 		writedlm(io, transpose(round.(θ[1:13],sigdigits=sigdigs)))
@@ -187,15 +187,15 @@ function saveprogress(ind,θ,l,sol; plotting=false)
 		write(io, "# t0\tTI\tIA\tv0\tw0\n")
 		writedlm(io, transpose(reshape(round.(θ[14:end],sigdigits=sigdigs-1), 5, :)))
 	end
-	open("./fittings/link/model_params.txt", "w") do io
+	open("./fittings/Nt_$(Nt)/model_params.txt", "w") do io
 		writedlm(io, transpose(round.(θ[1:13],sigdigits=sigdigs)))
 	end
-	open("./fittings/link/stim_params.txt", "w") do io
+	open("./fittings/Nt_$(Nt)/stim_params.txt", "w") do io
 		writedlm(io, transpose(reshape(round.(θ[14:end],sigdigits=sigdigs-1), 5, :)))
 	end
 	if plotting
 		fig, axs = plotFits(θ,sol)
-		fig.savefig("./fittings/link/all_fits.pdf",bbox_inches="tight")
+		fig.savefig("./fittings/Nt_$(Nt)/all_fits.pdf",bbox_inches="tight")
 		plt.close(fig)
 		#=
 		# mysterious python error:
@@ -252,14 +252,14 @@ print("\n\tFinal loss: $(l); Initial loss: $(l1).\n")
 
 if sqrt(l/Nt/Nsols) < 0.15 # 15% error threshold contribution to RMS per time-step per ode
 	saveprogress(length(iter),result.u,l,sol; plotting=true)
-	open("./fittings/link/all_params.txt", "a") do io
+	open("./fittings/Nt_$(Nt)/all_params.txt", "a") do io
 		write(io, "\n")
 		write(io, "# Loss (initial) = $(loss(P,nothing)[1])\n")
 		write(io, "# Loss (final) = $(loss(result.u,nothing)[1])\n")
 		Q = result.u; Q[1:13] .= P[1:13];	
 		write(io, "# Loss (resample) = $(loss(Q,nothing)[1])\n")
 	end
-	cp("./fittings/link/all_params.txt", "./fittings/link/$(length(PP)+1).txt");
+	cp("./fittings/Nt_$(Nt)/all_params.txt", "./fittings/Nt_$(Nt)/$(length(PP)+1).txt");
 else
 	print("\n l = $(l), RMS = $(sqrt(l/(Nt*Nsols))).\n");
 end
