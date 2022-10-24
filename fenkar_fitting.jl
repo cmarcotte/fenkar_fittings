@@ -34,7 +34,7 @@ const sigdigs	= 5
 const skipPars  = 0
 
 # make the parameters for the solution
-const Nt = 1200
+const Nt = 1000
 const dt = 2.0			# time between samples -- set by the data
 const tspan = (0.0,Nt*dt)
 const t = collect(range(tspan[1], tspan[2]; length=Nt));
@@ -70,7 +70,7 @@ function knownParameters()
 end
 
 function deflationOperator(PP; a=1.0)
-	M(P) = 1.0 #prod([a + 1.0./sum(abs2,P.-p) for p in PP])
+	M(P) = prod([a + 1.0./sum(abs2,P.-p) for p in PP])
 	return M
 end
 
@@ -81,7 +81,7 @@ ub= zeros(Float64, 13 + 5*62)
 #####		tsi,	tv1m,	tv2m,	tvp,	twm,	twp,	td,	to,	tr,	xk,	uc,	uv,	ucsi
 P[1:13] .= [	29.0	19.6	1250.0	3.33	41.0	870.0	0.25	12.5	33.3	10.0	0.13	0.04	0.85	][1:13]
 lb[1:13].= [ 	1.0, 	1.0, 	1.0, 	1.0, 	1.0, 	1.0, 	0.05, 	1.0, 	1.0, 	9.0, 	0.10, 	0.01, 	0.10 	][1:13]
-ub[1:13].= [ 	1000.0, 1000.0, 1000.0, 15.0,	1000.0,	1000.0,	0.15, 	1000.0,	1000.0,	11.0,	0.15,	0.05,	0.90 	][1:13]
+ub[1:13].= [ 	1000.0, 1000.0, 2000.0, 15.0,	1000.0,	1000.0,	0.50, 	1000.0,	1000.0,	11.0,	0.15,	0.05,	0.90 	][1:13]
 
 # initialize stimulus parameters with randomly chosen values, adapt lb/ub to fit
 for m in 1:62
@@ -163,6 +163,7 @@ function plotFits(θ,sol; target=target)
 
 	fig, axs = plt.subplots(Int(ceil(62/8)),8, figsize=(dw,dw*1.05*(Int(ceil(62/8))/8)), 
 				sharex=true, sharey=true, constrained_layout=true)
+	xt = collect(0:4).*(Nt*dt/4);
 	for n in 1:Nsols
 		# linear indexing into Array{Axis,2}
 		axs[n].plot(t, target[1,:,n], "-k", linewidth=1.6)
@@ -173,8 +174,8 @@ function plotFits(θ,sol; target=target)
 	end
 	axs[1].set_ylim([-0.1,1.1])
 	axs[1].set_xlim([t[begin],t[end]])
-	#axs[1].set_xticks([0.0,250.0,500.0,750.0,1000.0])
-	#axs[1].set_xticklabels(["","250","","750",""])
+	axs[1].set_xticks(xt)
+	axs[1].set_xticklabels(["","$(round(xt[2]))","","$(round(xt[4]))",""])
 	return fig, axs
 end
 

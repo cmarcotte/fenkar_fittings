@@ -7,9 +7,15 @@ module fenkar
 		return 0.5*(1.0 + tanh(k*x))
 	end
 	
-	function Istim(t,IA,t0,TI)
+	function Monophasic(t,IA,t0,TI)
 		return IA*H(t-t0;k=1.0)*sin(pi*(t-t0)/TI)^500
 	end
+	
+	function Biphasic(t,IA,t0,TI)
+		return IA*H(t-t0;k=1.0)*500*(pi/TI)*cos(pi*(t-t0)/TI)*sin(pi*(t-t0)/TI)^499
+	end
+	
+	Istim(t,IA,t0,TI) = Monophasic(t,IA,t0,TI);
 	
 	function fenkar!(dx, x, p, t)
 		

@@ -54,7 +54,6 @@ function knownLosses()
 	return LL
 end
 
-
 function knownParameters()
 	PP = []
 	loading = true
@@ -98,9 +97,9 @@ function loss(θ, _p; ensemble=EnsembleThreads())
 	return l,sol
 end
 
-function plotFits(θ,sol; target=target)
-	
-	fig, axs = plt.subplots(Int(ceil(62/8)),8, figsize=(dw,dw*1.05*(Int(ceil(62/8))/8)), 
+function plotFits(θ,sol,index; target=target)
+
+	fig, axs = plt.subplots(Int(ceil(Nsols/8)),8, figsize=(dw,dw*1.05*(Int(ceil(Nsols/8))/8)), 
 				sharex=true, sharey=true, constrained_layout=true)
 	for n in 1:Nsols
 		# linear indexing into Array{Axis,2}
@@ -109,28 +108,14 @@ function plotFits(θ,sol; target=target)
 		axs[n].plot(t, Istim.(t,-θ[13+5*(n-1)+3],θ[13+5*(n-1)+1],θ[13+5*(n-1)+2]), "-r", linewidth=0.5)
 		axs[n].plot(t, sol[1,:,n], "-C1", linewidth=1)
 	end
+	xt = collect(0:4).*(Nt*dt/4);
 	axs[1].set_ylim([-0.1,1.1])
-	axs[1].set_xlim([0.0,1000.0])
-	axs[1].set_xticks([0.0,250.0,500.0,750.0,1000.0])
-	axs[1].set_xticklabels(["","250","","750",""])
-	plt.savefig("./fittings/Nt_$(Nt)/$n.pdf",bbox_inches="tight")
+	axs[1].set_xlim([t[begin],t[end]])
+	axs[1].set_xticks(xt)
+	axs[1].set_xticklabels(["","$(round(xt[2]))","","$(round(xt[4]))",""])
+	plt.savefig("./fittings/Nt_$(Nt)/$index.pdf",bbox_inches="tight")
 	plt.close(fig)
-	
-	#=
-	plts = []
-	for n in 1:Nsols
-		nplt = plot();
-		# linear indexing into Array{Axis,2}
-		plot!(nplt, t, target[1,:,n], linecolor=:black, linewidth=4)
-		# plotting the (negated) stimulus current to make sure things line up
-		plot!(nplt, t, Istim.(t,-θ[13+5*(n-1)+3],θ[13+5*(n-1)+1],θ[13+5*(n-1)+2]), linecolor=:red, linewidth=1)
-		plot!(nplt, t, sol[1,:,n], linecolor=:orange, linewidth=2)
-		plot!(xticks=(0:250:1000,["","250","","750",""]),xlim=[0.0,1000.0],legend=false,ylim=[-0.1,1.1],size=(300,300))
-		push!(plts,nplt)
-	end
-	comboplt = plot(plts..., Nt_$(Nt)=:all, layout=(8,8), size=(1000,1000))
-	=#
-	
+		
 	return nothing
 end
 
@@ -152,63 +137,141 @@ function analyzeTrace(t, V; V90=0.2)
 	Vt = Spline1D(t[:], V.-V90, k=3);
 	
 	R = roots(Vt; maxn=Int(5e3));	# time points R: V(R) == V90
-	D = derivative(Vt, R);			# V'(R)
 	
 	# storage for APD, DI, APA for this BCL
 	APD = Float64[]
 	DI  = Float64[]
 	APA = Float64[]
 	
-	for n in 1:length(R)-1
-		if D[n] > 0 && D[n+1] < 0
-			push!(APD, R[n+1]-R[n])
-			push!(APA, V90+maximum(Vt(R[n]:dt:R[n+1])))
-		elseif D[n] < 0 && D[n+1] > 0
-			push!(DI, R[n+1]-R[n])
+	if !isempty(R)
+		D = derivative(Vt, R);			# V'(R)
+		
+		for n in 1:length(R)-1
+			if D[n] > 0 && D[n+1] < 0
+				push!(APD, R[n+1]-R[n])
+				push!(APA, V90+maximum(Vt(R[n]:dt:R[n+1])))
+			elseif D[n] < 0 && D[n+1] > 0
+				push!(DI, R[n+1]-R[n])
+			end
 		end
 	end
 	return (APD, DI, APA)
 end
 
-function main()
+function distros(data, LL)
+	pnames=["tsi", "tv1m", "tv2m", "tvp", "twm", "twp", "td", "to", "tr", "xk", "uc", "uv", "ucsi"]
+	
+	fig, axs = plt.subplots(1,length(pnames),figsize=(dw+sw,sw/2),sharey=true,constrained_layout=true)
+	for m in 1:length(pnames)
+		if m==length(pnames)
+			sc = axs[m].scatter(data[m,:], LL, c=LL, s=10, cmap="viridis")
+			fig.colorbar(sc, ax=axs[:], aspect=50, label="Loss")
+		else
+			axs[m].scatter(data[m,:], LL, c=LL, s=10, cmap="viridis");
+		end
+		axs[m].set_xlabel("$(pnames[m])")
+		if m==1
+			axs[m].set_ylabel("Loss")
+		end
+	end
+	fig.savefig("./fittings/Nt_$(Nt)/distros_pp.pdf",bbox_inches="tight",dpi=300)
+	plt.close(fig)
+end
+
+function paramCovariance(data, LL)
+	
+	pnames=["tsi", "tv1m", "tv2m", "tvp", "twm", "twp", "td", "to", "tr"]#, "xk", "uc", "uv", "ucsi"]
+	fig, axs = plt.subplots(length(pnames),length(pnames),figsize=(dw*1.2,dw),sharey="row",sharex="col",constrained_layout=true)
+	for n in 1:length(pnames), m in 1:length(pnames)
+		if m==length(pnames) && n==length(pnames)
+			sc = axs[n,m].scatter(data[m,:], data[n,:], c=LL, s=10, cmap="viridis")
+			fig.colorbar(sc, ax=axs[:], aspect=50, label="Loss")
+		else
+			axs[n,m].scatter(data[m,:], data[n,:], c=LL, s=10, cmap="viridis");
+		end
+		if m==1
+			axs[n,m].set_ylabel("$(pnames[n])")
+		end
+		if n==length(pnames)
+			axs[n,m].set_xlabel("$(pnames[m])")
+		end
+	end
+	fig.savefig("./fittings/Nt_$(Nt)/covariance_pp.pdf",bbox_inches="tight",dpi=300)
+	plt.close(fig)
+end
+
+function plotBCLs(BCLs, APDs, DIs, APAs)
+
+	fig, axs = plt.subplots(3,1, figsize=(sw,dw), sharex=true, constrained_layout=true);
+	#axs[1].set_xlabel("BCL [ms]")
+	axs[1].set_ylabel("APD [ms]")
+	#axs[2].set_xlabel("BCL [ms]")
+	axs[2].set_ylabel("DI  [ms]")
+	axs[3].set_xlabel("BCL [ms]")
+	axs[3].set_ylabel("APA [  ]")
+	axs[1].plot(APDs[:,1], APDs[:,2], ".C0", markersize=4, alpha=0.3, label="")
+	axs[2].plot( DIs[:,1],  DIs[:,2], ".C0", markersize=4, alpha=0.3, label="")
+	axs[3].plot(APAs[:,1], APAs[:,2], ".C0", markersize=4, alpha=0.3, label="")
+	APDs, DIs, APAs = analyzeTraces(t, target);
+	for (BCL, APD, DI, APA) in zip(BCLs, APDs, DIs, APAs)
+		axs[1].plot(BCL*ones(Float64, length(APD)), APD, ".k", markersize=6)
+		axs[2].plot(BCL*ones(Float64, length(DI)),   DI, ".k", markersize=6)
+		axs[3].plot(BCL*ones(Float64, length(APA)), APA, ".k", markersize=6)
+	end
+	plt.savefig("./fittings/Nt_$(Nt)/BCLs.pdf",bbox_inches="tight")
+	plt.close(fig)
+	return nothing
+end
+
+function main(;truncateModelParams=false)
 	
 	# get known parameters and form deflation operator
 	PP = knownParameters();
 	LL = knownLosses();
 
-	fig, axs = plt.subplots(1, 3, figsize=(dw,sw), sharex="row", sharey="col", constrained_layout=true);
-	axs[1].set_xlabel("BCL [ms]")
-	axs[1].set_ylabel("APD [ms]")
-	axs[2].set_xlabel("BCL [ms]")
-	axs[2].set_ylabel("DI  [ms]")
-	axs[3].set_xlabel("BCL [ms]")
-	axs[3].set_ylabel("APA [  ]")
-	APDs, DIs, APAs = analyzeTraces(t, target);
-	for (BCL, APD, DI, APA) in zip(BCLs, APDs, DIs, APAs)
-		axs[1].plot(BCL*ones(Float64, length(APD)), APD, ".k", markersize=4)
-		axs[2].plot(BCL*ones(Float64, length(DI)),   DI, ".k", markersize=4)
-		axs[3].plot(BCL*ones(Float64, length(APA)), APA, ".k", markersize=4)
-	end
+	APDs = []
+	DIs  = []
+	APAs = []
 	for (n,(P,L)) in enumerate(zip(PP,LL))
 		# get loss and solution for parameters P
 		l,sol = loss(P,SciMLBase.NullParameters()); 
-		#=
-		plotFits(P,sol; target=target);
+		tmpAPDs, tmpDIs, tmpAPAs = analyzeTraces(t, sol);
+		
+		for n in 1:Nsols
+			for m in eachindex(tmpAPDs[n])
+				push!(APDs, [BCLs[n] ;; tmpAPDs[n][m]]);
+			end
+			for m in eachindex(tmpDIs[n])
+				push!(DIs,  [BCLs[n] ;; tmpDIs[n][m]]);
+			end
+			for m in eachindex(tmpAPAs[n])
+				push!(APAs, [BCLs[n] ;; tmpAPAs[n][m]]);
+			end
+		end
+				
+		# plotFits(P,sol,n; target=target);
 		
 		if l > 1.05*L
-			print("Oddity; parameters $n: \tL=$(L), \tl=$(l).\n")
+			print("Oddity: parameter set $n; \tL=$(L), \tl=$(l).\n")
 		end
-		=#
-		APDs, DIs, APAs = analyzeTraces(t, sol);
-		for (BCL, APD, DI, APA) in zip(BCLs, APDs, DIs, APAs)
-			axs[1].plot(BCL*ones(Float64, length(APD)), APD, ".C0", alpha=0.1, markersize=5)
-			axs[2].plot(BCL*ones(Float64, length(DI)),   DI, ".C0", alpha=0.1, markersize=5)
-			axs[3].plot(BCL*ones(Float64, length(APA)), APA, ".C0", alpha=0.1, markersize=5)
-		end
-		
 	end
-	plt.savefig("./fittings/Nt_$(Nt)/BCLs.pdf",bbox_inches="tight")
-	plt.close(fig)
+	
+	APDs = reduce(vcat, APDs);
+	 DIs = reduce(vcat,  DIs);
+	APAs = reduce(vcat, APAs);
+	
+	plotBCLs(BCLs, APDs, DIs, APAs);
+	
+	data = reduce(hcat, PP);
+	data = Float64.(data);
+	
+	# optionally truncate to just the model parameters
+	if truncateModelParams
+		data = data[1:13,:];
+	end
+
+	distros(data, LL);
+	paramCovariance(data, LL);
 	
 	return nothing
 end
