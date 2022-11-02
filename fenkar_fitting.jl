@@ -1,9 +1,9 @@
 include("./model.jl")
 using .fenkar
-using DifferentialEquations
-using ForwardDiff
-using Optimization, OptimizationNLopt
+using OrdinaryDiffEq
+using ForwardDiff, Optimization, OptimizationNLopt
 using Random, DelimitedFiles
+
 using PyPlot
 plt.style.use("seaborn-paper")
 PyPlot.rc("font", family="serif")
@@ -34,7 +34,7 @@ const sigdigs	= 5
 const skipPars  = 0
 
 # make the parameters for the solution
-const Nt = 1000
+const Nt = parse(Int, ARGS[1])
 const dt = 2.0			# time between samples -- set by the data
 const tspan = (0.0,Nt*dt)
 const t = collect(range(tspan[1], tspan[2]; length=Nt));
@@ -78,13 +78,13 @@ end
 P = zeros(Float64, 13 + 5*62)
 lb= zeros(Float64, 13 + 5*62)
 ub= zeros(Float64, 13 + 5*62)
-#####		tsi,	tv1m,	tv2m,	tvp,	twm,	twp,	td,	to,	tr,	xk,	uc,	uv,	ucsi
+#####			tsi,	tv1m,	tv2m,	tvp,	twm,	twp,	td,		to,		tr,		xk,		uc,		uv,		ucsi
 P[1:13] .= [	29.0	19.6	1250.0	3.33	41.0	870.0	0.25	12.5	33.3	10.0	0.13	0.04	0.85	][1:13]
 lb[1:13].= [ 	1.0, 	1.0, 	1.0, 	1.0, 	1.0, 	1.0, 	0.05, 	1.0, 	1.0, 	9.0, 	0.10, 	0.01, 	0.10 	][1:13]
 ub[1:13].= [ 	1000.0, 1000.0, 2000.0, 15.0,	1000.0,	1000.0,	0.50, 	1000.0,	1000.0,	11.0,	0.15,	0.05,	0.90 	][1:13]
 
 # initialize stimulus parameters with randomly chosen values, adapt lb/ub to fit
-for m in 1:62
+for m in 1:Nsols
 	P[13 + 5*(m-1) + 1] = t0s[m]					# stimlus offset / phase
 	P[13 + 5*(m-1) + 2] = BCLs[m]					# stimulus period
 	P[13 + 5*(m-1) + 3] = min(max(0.0,0.159 + 0.025*randn()),0.25)	# stimulus amplitude
@@ -131,7 +131,7 @@ function model1(θ,ensemble)
 	end
 
 	ensemble_prob = EnsembleProblem(prob, prob_func = prob_func)
-	sim = solve(ensemble_prob, Tsit5(), ensemble, saveat = t, save_idxs=1:1, trajectories = 62, maxiters=Int(1e8))
+	sim = solve(ensemble_prob, Tsit5(), ensemble, saveat = t, save_idxs=1:1, trajectories = 62, maxiters=Int(1e8), abstol=1e-8, reltol=1e-6)
 	
 end
 
@@ -151,7 +151,7 @@ function loss(θ, _p; ensemble=EnsembleThreads())
 	elseif size(Array(sol)) != size(target[:,:,1:Nsols])
 		print("I'm a doodoohead poopface") 
 	else
-		l = sum(abs2, (target[:,:,1:Nsols].-Array(sol))) * M(θ[1:13])
+		l = sum(abs2, (target[:,:,1:Nsols].-Array(sol))) * M(θ[1:13])/(Nt*Nsols)
 	end
 	return l,sol
 end
@@ -217,7 +217,7 @@ cb = function (θ,l,sol; plotting=false) # callback function to observe training
 	if isinf(l) || isnothing(l)
 	        return true
 	elseif mod(length(iter),10) == 0
-		print("Iter = $(length(iter)), \tLoss = $(round(l;sigdigits=sigdigs)), \tReduction by $(round(100*(1-l/l1);sigdigits=sigdigs))%.\n");
+		print("Iter = $(length(iter)), \tLoss = $(round(l;sigdigits=sigdigs)), \tRMS Loss=$(round(sqrt(l);sigdigits=sigdigs)), \tReduction by $(round(100*(1-l/l1);sigdigits=sigdigs))%.\n");
 		if l < 1.1*maximum(iter) && mod(length(iter),50) == 0
 			saveprogress(length(iter),θ,l,sol; plotting=plotting);
 		end
@@ -251,7 +251,8 @@ print("\n\tFinal loss: $(l); Initial loss: $(l1).\n")
 	some wiggle room and set it to be < 15%.
 =#
 
-if sqrt(l/Nt/Nsols) < 0.15 # 15% error threshold contribution to RMS per time-step per ode
+print("\n l = $(l), RMS = $(sqrt(l)).\n");
+if sqrt(l) < 0.15 # 15% error threshold contribution to RMS per time-step per ode
 	saveprogress(length(iter),result.u,l,sol; plotting=true)
 	open("./fittings/Nt_$(Nt)/all_params.txt", "a") do io
 		write(io, "\n")
@@ -261,6 +262,4 @@ if sqrt(l/Nt/Nsols) < 0.15 # 15% error threshold contribution to RMS per time-st
 		write(io, "# Loss (resample) = $(loss(Q,nothing)[1])\n")
 	end
 	cp("./fittings/Nt_$(Nt)/all_params.txt", "./fittings/Nt_$(Nt)/$(length(PP)+1).txt");
-else
-	print("\n l = $(l), RMS = $(sqrt(l/(Nt*Nsols))).\n");
 end

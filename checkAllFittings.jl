@@ -21,7 +21,7 @@ const dw = 7.05826
 #using Plots
 	
 # make the parameters for the solution
-const Nt = 1200
+const Nt = parse(Int, ARGS[1])
 const dt = 2.0			# time between samples -- set by the data
 const tspan = (0.0,Nt*dt)
 const t = collect(range(tspan[1], tspan[2]; length=Nt));
@@ -80,7 +80,7 @@ function model1(θ,ensemble)
 	end
 
 	ensemble_prob = EnsembleProblem(prob, prob_func = prob_func)
-	sim = solve(ensemble_prob, Tsit5(), ensemble, saveat = t, save_idxs=1:1, trajectories = 62, maxiters=Int(1e8))
+	sim = solve(ensemble_prob, Tsit5(), ensemble, saveat = t, save_idxs=1:1, trajectories = 62, maxiters=Int(1e8), abstol=1e-8, reltol=1e-6)
 	
 end
 
@@ -180,9 +180,12 @@ end
 
 function paramCovariance(data, LL)
 	
-	pnames=["tsi", "tv1m", "tv2m", "tvp", "twm", "twp", "td", "to", "tr"]#, "xk", "uc", "uv", "ucsi"]
+	pnames=["tsi", "tv1m", "tv2m", "tvp", "twm", "twp", "td", "to", "tr", "xk", "uc", "uv", "ucsi"]
 	fig, axs = plt.subplots(length(pnames),length(pnames),figsize=(dw*1.2,dw),sharey="row",sharex="col",constrained_layout=true)
-	for n in 1:length(pnames), m in 1:length(pnames)
+	
+	weightedMeans = [sum(data[n,:].*(1.0./LL[:])) for n in 1:length(pnames)]/sum(1.0./LL[:])
+	
+	for m in 1:length(pnames), n in 1:length(pnames)
 		if m==length(pnames) && n==length(pnames)
 			sc = axs[n,m].scatter(data[m,:], data[n,:], c=LL, s=10, cmap="viridis")
 			fig.colorbar(sc, ax=axs[:], aspect=50, label="Loss")
@@ -195,6 +198,8 @@ function paramCovariance(data, LL)
 		if n==length(pnames)
 			axs[n,m].set_xlabel("$(pnames[m])")
 		end
+		axs[n,m].plot(weightedMeans[m], weightedMeans[n], ".r", markersize=4)
+		axs[n,m].tick_params(direction="in")
 	end
 	fig.savefig("./fittings/Nt_$(Nt)/covariance_pp.pdf",bbox_inches="tight",dpi=300)
 	plt.close(fig)
@@ -272,6 +277,9 @@ function main(;truncateModelParams=false)
 
 	distros(data, LL);
 	paramCovariance(data, LL);
+	
+	n = argmin(LL);
+	print("\nLowest per-element-loss = $(sqrt(LL[n]/Nt/Nsols)) for index $(n).\n")
 	
 	return nothing
 end
