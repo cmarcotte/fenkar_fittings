@@ -1,8 +1,7 @@
 include("./model.jl")
 using .fenkar
-using DifferentialEquations
-using ForwardDiff
-using Optimization, OptimizationNLopt
+using OrdinaryDiffEq
+using ForwardDiff, Optimization, OptimizationNLopt
 using Random, DelimitedFiles
 using Dierckx
 using Statistics
@@ -182,14 +181,14 @@ function main(;truncateModelParams=false)
 	
 	kriging_surrogate = Kriging(QQ, LL, lb, ub)
 
-    @benchmark kriging_surrogate(P)
-
-    @benchmark loss(P)
-
 	#P = lb .+ rand(Float64,length(ub)).*(ub.-lb);
 	P = QQ[argmin(LL)] .+ 0.1.*abs.(QQ[argmin(LL)]).*randn(Float64,length(ub))
 	true_loss = loss(P)
 	kriging_loss = kriging_surrogate(P)
+	
+	@benchmark kriging_surrogate(P)
+
+    @benchmark loss(P)
 	
 	@show surrogate_optimize(loss, SRBF(), lb, ub, kriging_surrogate, SobolSample())
 	

@@ -1,3 +1,4 @@
+__precompile__()
 module fenkar
 
 	export fenkar!, noise!, Istim

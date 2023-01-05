@@ -1,8 +1,7 @@
 include("./model.jl")
 using .fenkar
-using DifferentialEquations
-using ForwardDiff
-using Optimization, OptimizationNLopt
+using OrdinaryDiffEq
+using ForwardDiff, Optimization, OptimizationNLopt
 using Random, DelimitedFiles
 using Dierckx
 using Statistics
@@ -92,7 +91,7 @@ function loss(θ, _p; ensemble=EnsembleThreads())
 	elseif size(Array(sol)) != size(target[:,:,1:Nsols])
 		print("I'm a doodoohead poopface") 
 	else
-		l = sum(abs2, (target[:,:,1:Nsols].-Array(sol)))
+		l = sum(abs2, (target[:,:,1:Nsols].-Array(sol))) / (Nt*Nsols)
 	end
 	return l,sol
 end
@@ -118,6 +117,31 @@ function plotFits(θ,sol,index; target=target)
 		
 	return nothing
 end
+
+function plotAllFits(ls,sols; target=target)
+
+	fig, axs = plt.subplots(Int(ceil(Nsols/8)),8, figsize=(dw,dw*1.05*(Int(ceil(Nsols/8))/8)), 
+				sharex=true, sharey=true, constrained_layout=true)
+	for n in 1:Nsols
+		# linear indexing into Array{Axis,2}
+		axs[n].plot(t, target[1,:,n], "-k", linewidth=1.6)
+	end
+	for (l,sol) in zip(ls,sols)
+		for n in 1:Nsols
+			axs[n].plot(t, sol[1,:,n], "-C1", linewidth=0.2, alpha=sqrt(l)/maximum(sqrt.(ls)))
+		end
+	end
+	xt = collect(0:4).*(Nt*dt/4);
+	axs[1].set_ylim([-0.1,1.1])
+	axs[1].set_xlim([t[begin],t[end]])
+	axs[1].set_xticks(xt)
+	axs[1].set_xticklabels(["","$(round(xt[2]))","","$(round(xt[4]))",""])
+	plt.savefig("./fittings/Nt_$(Nt)/all_fits.pdf",bbox_inches="tight")
+	plt.close(fig)
+		
+	return nothing
+end
+
 
 function analyzeTraces(t, Vs)
 	APDs = [];
@@ -178,6 +202,15 @@ function distros(data, LL)
 	plt.close(fig)
 end
 
+function losses(LL)
+	fig = plt.figure(figsize=(sw,sw/2),constrained_layout=true)
+	plt.hist(LL, bins=33, density=true, label="Loss")
+	#plt.xlabel("\$ \ell \$")
+	#plt.ylabel("\$ P(\ell) \$")
+	fig.savefig("./fittings/Nt_$(Nt)/losses.pdf",bbox_inches="tight",dpi=300)
+	plt.close(fig)
+end
+
 function paramCovariance(data, LL)
 	
 	pnames=["tsi", "tv1m", "tv2m", "tvp", "twm", "twp", "td", "to", "tr", "xk", "uc", "uv", "ucsi"]
@@ -214,9 +247,10 @@ function plotBCLs(BCLs, APDs, DIs, APAs)
 	axs[2].set_ylabel("DI  [ms]")
 	axs[3].set_xlabel("BCL [ms]")
 	axs[3].set_ylabel("APA [  ]")
-	axs[1].plot(APDs[:,1], APDs[:,2], ".C0", markersize=4, alpha=0.3, label="")
-	axs[2].plot( DIs[:,1],  DIs[:,2], ".C0", markersize=4, alpha=0.3, label="")
-	axs[3].plot(APAs[:,1], APAs[:,2], ".C0", markersize=4, alpha=0.3, label="")
+	sc = axs[1].scatter(APDs[:,1], APDs[:,3], c=APDs[:,2], s=4, alpha=0.3, cmap="viridis", label="")
+	axs[2].scatter( DIs[:,1],  DIs[:,3], c= DIs[:,2], s=4, alpha=0.3, cmap="viridis", label="")
+	axs[3].scatter(APAs[:,1], APAs[:,3], c=APAs[:,2], s=4, alpha=0.3, cmap="viridis", label="")
+	fig.colorbar(sc, ax=axs[:], aspect=50, label="Loss")
 	APDs, DIs, APAs = analyzeTraces(t, target);
 	for (BCL, APD, DI, APA) in zip(BCLs, APDs, DIs, APAs)
 		axs[1].plot(BCL*ones(Float64, length(APD)), APD, ".k", markersize=6)
@@ -237,26 +271,34 @@ function main(;truncateModelParams=false)
 	APDs = []
 	DIs  = []
 	APAs = []
+	ls   = []
+	sols = []
 	for (n,(P,L)) in enumerate(zip(PP,LL))
+	
 		# get loss and solution for parameters P
 		l,sol = loss(P,SciMLBase.NullParameters()); 
+		
+		push!(ls, l)
+		push!(sols, sol)
+		
+		# analyze sol
 		tmpAPDs, tmpDIs, tmpAPAs = analyzeTraces(t, sol);
 		
 		for n in 1:Nsols
 			for m in eachindex(tmpAPDs[n])
-				push!(APDs, [BCLs[n] ;; tmpAPDs[n][m]]);
+				push!(APDs, [BCLs[n] ;; L ;; tmpAPDs[n][m]]);
 			end
 			for m in eachindex(tmpDIs[n])
-				push!(DIs,  [BCLs[n] ;; tmpDIs[n][m]]);
+				push!(DIs,  [BCLs[n] ;; L ;; tmpDIs[n][m]]);
 			end
 			for m in eachindex(tmpAPAs[n])
-				push!(APAs, [BCLs[n] ;; tmpAPAs[n][m]]);
+				push!(APAs, [BCLs[n] ;; L ;; tmpAPAs[n][m]]);
 			end
 		end
 				
 		# plotFits(P,sol,n; target=target);
 		
-		if l > 1.05*L
+		if abs(l-L) > 0.05*min(L,l)
 			print("Oddity: parameter set $n; \tL=$(L), \tl=$(l).\n")
 		end
 	end
@@ -277,9 +319,17 @@ function main(;truncateModelParams=false)
 
 	distros(data, LL);
 	paramCovariance(data, LL);
+	plotAllFits(ls, sols);
 	
 	n = argmin(LL);
-	print("\nLowest per-element-loss = $(sqrt(LL[n]/Nt/Nsols)) for index $(n).\n")
+	print("\nLowest per-element-loss = $(LL[n]) for index $(n).\n")
+	
+	
+	for err in 0.005:0.005:0.02
+		pct = round(100*length(findall(LL .< err)) / length(LL));
+		print("Proportion of losses below $(err): $(pct)%.\n")
+	end
+	losses(LL);
 	
 	return nothing
 end

@@ -1,78 +1,161 @@
-using DelimitedFiles, GlobalSensitivity, QuasiMonteCarlo, Statistics, OrdinaryDiffEq, Plots
-#=
-const Nt = 1200;
+__precompile__()
+module sensitivity
+include("dataManagement.jl"); include("plotting.jl"); include("fitting.jl")
+using .dataManagement, .plotting, .fitting
+using ForwardDiff, LinearAlgebra, PyPlot, GlobalSensitivity, ProgressBars
 
-function knownParametersLosses()
-	LL = []
-	PP = []
-	loading = true
-	ind = 0
-	while loading
-		try
-			ind = ind + 1
-			tmp = readdlm("./fittings/Nt_$(Nt)/$(ind).txt"; comments=true, comment_char='#');
-			push!(PP, vcat(tmp[1,1:13][:],transpose(tmp[2:end,1:5])[:]))
-			tmp = readdlm("./fittings/Nt_$(Nt)/$(ind).txt");
-			push!(LL, Float64(tmp[1,4]))
-		catch
-			loading = false
+const dt = 2.0				# time between samples -- set by the data
+const u0 = rand(Float64,3)
+const Nsols = 62
+const tspan = (0.0,Nt*dt)
+const t = collect(range(tspan[1], tspan[2]; length=Nt));
+const target = zeros(Float64, 1, Nt, Nsols);
+const t0s = zeros(Float64, Nsols);
+const BCLs = zeros(Float64, Nsols);
+loadTargetData!(target, t0s, BCLs; Nt=Nt)
+const LL, PP = knownFits(Nt; truncate=false);
+
+pnames=["tsi", "tv1m", "tv2m", "tvp", "twm", "twp", "td", "to", "tr", "xk", "uc", "uv", "ucsi"]
+vnames = ["\$ t_0 \$", "BCL \$ \$", "\$ I_\\mathrm{stim} \$", "\$ v_0 \$", "\$ w_0 \$"]
+
+LOSS(x) = loss(x; u0=u0, tspan=tspan, t=t, Nt=Nt, Nsols=Nsols, target=target, M=(x)->(1.0))[1];
+
+function initializeParamsAndBounds(PP)
+	P, lb, ub = parametersAndBounds(Nt, Nsols, t0s, BCLs; modelfile=true, stimfile=false);
+	for P in PP
+		for n in 1:length(P)
+			lb[n] = min(lb[n],P[n])
+			ub[n] = max(ub[n],P[n])
 		end
 	end
-	print("There are $(length(PP)) known model parameter sets!\n");
-	return LL,PP
+	return (P, lb, ub)
 end
 
-function 
+function localSensitivity(LOSS, P, n)
+	g = ForwardDiff.gradient(LOSS, P);
+	H = ForwardDiff.hessian(LOSS, P);
+	F = eigen(H);
+	
+	plt.figure(figsize=(plotting.sw,plotting.sw/2), constrained_layout=true)
+	plt.hist(abs.(F.values), bins=10.0.^(-6:1:+6));
+	plt.xscale("log")
+	plt.xlabel("\$ \\lambda(H) \$")
+	plt.ylabel("Count \$ \$")
+	plt.savefig("./$(n)_hessian_eigvals.pdf", dpi=300);
+	plt.close();
+	
+	plt.figure(figsize=(plotting.sw,plotting.sw/2), constrained_layout=true)
+	plt.stem(1:13, g[1:13], label="Gradient \$ \$")
+	plt.xticks(1:1:13)
+	plt.grid()
+	plt.legend(loc=0, edgecolor="none");
+	plt.yticks([])
+	plt.savefig("./$(n)_model_param_gradient.pdf", dpi=300);
+	plt.close();
+	
+	fig, axs = plt.subplots(5, 1, figsize=(plotting.sw,plotting.sw), sharex=true, sharey=false, constrained_layout=true)
+	for i in 1:5
+		axs[i].stem(1:Nsols, g[(13+i):5:length(P)], label=nothing);
+		axs[i].set_yticks([]);
+		axs[i].grid();
+		axs[i].set_xticks(1:5:Nsols)
+		axs[i].set_ylabel(vnames[i])
+	end
+	plt.savefig("./$(n)_stim_param_gradient.pdf", dpi=300);
+	plt.close();
 
-function main()
-	LL, PP = knownParameters();
+	inds = sortperm(abs.(F.values));
+	fig, axs = plt.subplots(10, 5, figsize=(plotting.dw,plotting.dw), sharex=true, sharey=true, constrained_layout=true)
+	for i in 1:length(axs)
+		axs[i].stem(1:13, abs.(F.vectors[1:13,inds[i]]), label="\$ \\lambda = $(round(F.values[inds[i]];sigdigits=2)) \$"); 
+		axs[i].set_yticks([]);
+		axs[i].legend(loc=0, edgecolor="none");
+		axs[i].grid()
+		axs[i].set_xticks(1:2:13)
+	end
+	plt.savefig("./$(n)_model_param_hessian_null_eigenvecs.pdf", dpi=300);
+	plt.close()
+
+	fig, axs = plt.subplots(5,5, figsize=(plotting.dw, plotting.dw), sharex=true, sharey="row", constrained_layout=true)
+	for i in 1:5
+		for j in 1:5
+			tmp=F.vectors[(13+i):5:length(P), inds[j]];
+			axs[i,j].stem(1:Nsols, abs.(tmp), label=nothing); 
+			axs[i,j].set_yticks([]);
+			#axs[i,j].legend(loc=0, edgecolor="none");
+			axs[i,j].grid()
+			axs[i,j].set_xticks(1:5:Nsols)
+		end
+		axs[i,1].set_ylabel(vnames[i])
+		axs[1,i].set_title("\$ \\lambda = $(round(F.values[inds[i]]; sigdigits=2)) \$")
+	end
+	plt.savefig("./$(n)_stim_param_hessian_null_eigenvecs.pdf", dpi=300);
+	plt.close()
 	
-	data = reduce(hcat, PP);
-	data = Float64.(data);
-		
+	return (g,H,F)
+end
+
+function estimateGlobalSensitivity(P, lb, ub, n; total_num_trajectory=100000, num_trajectory=10000)
+
+	modelLoss(x) = LOSS([x; P[14:end]]);
+	stimLoss(x) = LOSS([P[1:13]; x]);
 	
-		
+	morris_resT = gsa(LOSS, Morris(total_num_trajectory=total_num_trajectory,num_trajectory=num_trajectory), collect(zip(lb,ub)));
+	morris_resM = gsa(modelLoss, Morris(total_num_trajectory=total_num_trajectory,num_trajectory=num_trajectory), collect(zip(lb[1:13],ub[1:13])));
+	morris_resS = gsa(stimLoss, Morris(total_num_trajectory=total_num_trajectory,num_trajectory=num_trajectory), collect(zip(lb[14:end],ub[14:end])));
+	
+	titles = ["Total \$ \$", "Model \$ \$", "Stimulus \$ \$"]
+	fig, axs = plt.subplots(2,1,figsize=(plotting.sw,2*plotting.sw/2), sharex=true, constrained_layout=true)
+	for (n,morris_res) in enumerate([morris_resT, morris_resM])
+		axs[n].scatter(1:13, abs.(morris_res.means[1:13]), marker="^", color="tab:blue")
+		ax2 = axs[n].twinx()
+		ax2.scatter(1:13, morris_res.variances[1:13], marker="v", color="tab:red")
+		axs[n].set_xticks(1:1:13)
+		axs[n].set_ylabel("Morris Abs. Means \$ \$", color="tab:blue")
+		ax2.set_ylabel("Morris Variances \$ \$", color="tab:red")
+		axs[n].set_yscale("log")
+		axs[n].set_title(titles[n])
+	end
+	axs[end].set_xlabel("Parameter Index \$ \$")
+	plt.savefig("./$(n)_model_param_morris_gsa.pdf", dpi=300);
+	plt.close()
+	
+	MM = length(P);
+	fig, axs = plt.subplots(2,5,figsize=(5*plotting.sw,2*plotting.sw/2), sharex=true, constrained_layout=true)
+	for m in 1:5
+		axs[1,m].scatter(1:Nsols, abs.(morris_resT.means[(13+m):5:MM]), marker="^", color="tab:blue")
+		ax2 = axs[1,m].twinx()
+		ax2.scatter(1:Nsols, morris_resT.variances[(13+m):5:MM], marker="v", color="tab:red")
+		axs[1,m].set_ylabel("Morris Abs. Means \$ \$", color="tab:blue")
+		ax2.set_ylabel("Morris Variances \$ \$", color="tab:red")
+		axs[1,m].set_yscale("log")
+		axs[1,m].set_title(titles[1])
+	end
+	for m in 1:5
+		axs[2,m].scatter(1:Nsols, abs.(morris_resT.means[m:5:MM-13]), marker="^", color="tab:blue")
+		ax2 = axs[2,m].twinx()
+		ax2.scatter(1:Nsols, morris_resT.variances[m:5:MM-13], marker="v", color="tab:red")
+		axs[2,m].set_ylabel("Morris Abs. Means \$ \$", color="tab:blue")
+		ax2.set_ylabel("Morris Variances \$ \$", color="tab:red")
+		axs[2,m].set_yscale("log")
+		axs[2,m].set_title(titles[3])
+		axs[end,m].set_xlabel("Solution Index \$ \$ - "*vnames[m])
+		axs[end,m].set_xticks(1:10:Nsols)
+	end
+	plt.savefig("./$(n)_stim_param_morris_gsa.pdf", dpi=300);
+	plt.close()
+	
+	#sobol_res = gsa(modelLoss, Sobol(order=[0,1,2]), collect(zip(lb[1:13],ub[1:13])); samples=10000)
+
+	return nothing
+	
+end
+
+function estimateGlobalSensitivities(PP, lb, ub)
+	for (n,P) in ProgressBar(enumerate(PP))
+		estimateGlobalSensitivity(P, lb, ub, n);
+	end
 	return nothing
 end
 
-main()
-=#
-
-function f(du,u,p,t)
-  du[1] = p[1]*u[1] - p[2]*u[1]*u[2] #prey
-  du[2] = -p[3]*u[2] + p[4]*u[1]*u[2] #predator
 end
-
-u0 = [1.0;1.0]
-tspan = (0.0,10.0)
-p = [1.5,1.0,3.0,1.0]
-prob = ODEProblem(f,u0,tspan,p)
-t = collect(range(0, stop=10, length=200))
-
-f1 = function (p)
-  prob_func(prob,i,repeat) = remake(prob;p=p[:,i])
-  ensemble_prob = EnsembleProblem(prob,prob_func=prob_func)
-  sol = solve(ensemble_prob,Tsit5(),EnsembleThreads();saveat=t,trajectories=size(p,2))
-  # Now sol[i] is the solution for the ith set of parameters
-  out = zeros(2,size(p,2))
-  for i in 1:size(p,2)
-    out[1,i] = mean(sol[i][1,:])
-    out[2,i] = maximum(sol[i][2,:])
-  end
-  out
-end
-
-samples = 5000
-lb = [1.0, 1.0, 1.0, 1.0]
-ub = [5.0, 5.0, 5.0, 5.0]
-sampler = SobolSample()
-A,B = QuasiMonteCarlo.generate_design_matrices(samples,lb,ub,sampler)
-
-sobol_result = gsa(f1,Sobol(),A,B,batch=true)
-
-p1 = bar(["a","b","c","d"],sobol_result.ST[1,:],title="Total Order Indices prey",legend=false)
-p2 = bar(["a","b","c","d"],sobol_result.S1[1,:],title="First Order Indices prey",legend=false)
-p1_ = bar(["a","b","c","d"],sobol_result.ST[2,:],title="Total Order Indices predator",legend=false)
-p2_ = bar(["a","b","c","d"],sobol_result.S1[2,:],title="First Order Indices predator",legend=false)
-plot(p1,p2,p1_,p2_)
-
