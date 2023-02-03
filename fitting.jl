@@ -11,17 +11,17 @@ const ltol = 0.15^2
 const atol = 1e-8
 const rtol = 1e-6
 
-function pinModelParams!(P,ub,lb; tol=1e-8)
+function pinModelParams!(P,ub,lb; tol=0.0)
 	inds = 1:13;
 	ub[inds] .= P[inds].*(1.0 .+ sign.(P[inds]).*tol)
-	lb[inds] .= P[1:13].*(1.0 .- sign.(P[inds]).*tol)
+	lb[inds] .= P[inds].*(1.0 .- sign.(P[inds]).*tol)
 	return nothing
 end
 
-function pinStimParams!(P,ub,lb; tol=1e-8)
+function pinStimParams!(P,ub,lb; tol=0.0)
 	inds = 14:length(P);
 	ub[inds] .= P[inds].*(1.0 .+ sign.(P[inds]).*tol)
-	lb[inds] .= P[1:13].*(1.0 .- sign.(P[inds]).*tol)
+	lb[inds] .= P[inds].*(1.0 .- sign.(P[inds]).*tol)
 	return nothing
 end
 
