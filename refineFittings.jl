@@ -2,6 +2,7 @@ const Nt = 500
 
 include("dataManagement.jl"); include("plotting.jl"); include("fitting.jl")
 using .dataManagement, .plotting, .fitting
+using Optimization, OptimizationNLopt
 
 const dt = 2.0				# time between samples -- set by the data
 const u0 = rand(Float64,3)
@@ -33,20 +34,37 @@ function pinExceptSetParams!(P, lb, ub, inds::AbstractArray{T}, n) where T <: In
 	return nothing
 end
 
-function refineFitParams(inds)
+function refineFitParams(n)
 	
-	for n in inds
-		
 		P, lb, ub = parametersAndBounds(Nt, Nsols, t0s, BCLs);
-		P[1:13] .= PP[n][1:13];
-		fitting.pinModelParams!(P, lb, ub; tol=0.0);
+		P[:] .= PP[n][:];
+		checkBoundValidity!(P, ub, lb);
+		fitting.pinModelParams!(P, ub, lb; tol=0.0);
 		
-		# fix everything except the one set of init/stim params
-		ns = 61:62#rand(1:Nsols,2); 
-		#pinExceptSetParams!(P, lb, ub, ns, n);	
-			
-		l0, sol0 = loss(PP[n]; tspan=tspan, t=t, target=target, Nt=Nt, Nsols=Nsols, M=(x)->1.0);
-		result, l, sol = optimizeParams(P, lb, ub; u0=u0, tspan=tspan, t=t, Nt=Nt, Nsols=Nsols, target=target, M=(x)->1.0);
+		ll(x,p) = loss(x; u0=u0, tspan=tspan, t=t, Nt=Nt, Nsols=Nsols, target=target, M=(x)->1.0)	
+		f = OptimizationFunction(ll, Optimization.AutoForwardDiff())
+		l0, sol0 = f(PP[n], nothing);
+		
+		global iter = Int(0);
+		cb = function (θ,l,sol) # callback function to observe training
+			global iter = iter + 1;
+			if isinf(l) || isnothing(l)
+				return true
+			elseif iter == 0 || iter == 1 || mod(iter,100) == 0
+				print("Iter = $(iter), \tl = $(round(l;digits=fitting.sigdigs)), \tl/l0 = $(round(l/l0;digits=fitting.sigdigs)).\n");
+			end
+			return false
+		end
+				
+		# Multi-stage Optimization:
+		#	Global:
+		optProb = OptimizationProblem(f, P, p = SciMLBase.NullParameters(), lb=lb, ub=ub);
+		result = solve(optProb, NLopt.GN_MLSL_LDS(), local_method = NLopt.LN_COBYLA(); callback = cb, maxiters=10_000, abstol=sqrt(fitting.atol), reltol=sqrt(fitting.rtol), xtol_rel=sqrt(fitting.atol), xtol_abs=sqrt(fitting.rtol));
+		#	Local:
+		optProb = OptimizationProblem(f, result.u, p = SciMLBase.NullParameters(), lb=lb, ub=ub);
+		result = solve(optProb, NLopt.LD_SLSQP(); callback = cb, abstol=fitting.atol, reltol=fitting.rtol, xtol_rel=fitting.atol, xtol_abs=fitting.rtol);
+		
+		l, sol = ll(result.u, nothing);
 		
 		print("="^80)
 		print("\n\tOriginal loss is $(l0), new loss is $(l).\n")
@@ -60,16 +78,14 @@ function refineFitParams(inds)
 		else
 			print("\tn=$(n) is not updated.\n")
 		end
-		print("="^80)
-	end
+		print("="^80*"\n")
+
 	return nothing
 end
 
 function main()
-	#names= ["Barone 𝑒𝑡 𝑎𝑙", "BR", "GP", "fit"]#, "mf35", ""mf35e"]
-	inds = [1019, 1307, 1301, 938]#, 1302, 1306]
-	for _ in 1:5
-		refineFitParams(1:1307);
+	Threads.@threads for n in 986:length(PP)
+		refineFitParams(n);
 	end
 	return nothing
 end
