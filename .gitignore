@@ -25,3 +25,6 @@ Manifest.toml
 
 # macOS files
 .DS_STORE
+
+# figures
+*.pdf
