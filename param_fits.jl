@@ -21,13 +21,15 @@ function param_fits(t, data, fits, inds, names, filename)
 	end
 	
 	# legend
-	if length(fits) < 6
+	if length(fits) <= 2
+		Legend(ga[0,:], axs[1], orientation=:horizontal, tellwidth=false, tellheight=true, framevisible=false, margin=(-8,-8,-8,-8), padding=0, valign=:bottom)
+	elseif length(fits) < 6
 		Legend(ga[0,:], axs[1], orientation=:horizontal, tellwidth=false, tellheight=true, framevisible=false, margin=(-8,-8,-8,-8), padding=0, valign=:bottom, nbanks=2)	
 	end
 	
 	# subplot labels
-	Label(ga[1,1,TopLeft()], "(a)", padding=(0,30,20,0), halign=:left, tellheight=false)
-	Label(ga[2,1,TopLeft()], "(b)", padding=(0,30,20,0), halign=:left, tellheight=false)
+	Label(ga[1,1,TopLeft()], "(a)", padding=(0,40,0,0), halign=:left, tellheight=false)
+	Label(ga[2,1,TopLeft()], "(b)", padding=(0,40,0,0), halign=:left, tellheight=false)
 	
 	# link axes
 	linkaxes!(axs[1], axs[2])
@@ -39,7 +41,7 @@ function param_fits(t, data, fits, inds, names, filename)
 	
 	# control spacing
 	colgap!(ga, 4)	
-	rowgap!(ga, 8)	
+	rowgap!(ga, 8)
 	
 	# explicit limits?
 	xlims!.((axs[1],axs[2]), 0,1000)
@@ -89,9 +91,9 @@ function main()
 		return sum(abs2,sols.-data[1,:,end-1:end])/prod(size(sols))
 	end
 	
-	names= ["Barone 𝑒𝑡 𝑎𝑙", "BR", "GP", "fit"]#, "mf35", ""mf35e"]
-	inds = [1019, 1307, 1301, 938]#, 1302, 1306]
 	
+	names= ["Barone 𝑒𝑡 𝑎𝑙.", "BR", "GP", "fit"]#, "mf35", ""mf35e"]
+	inds = [1019, 1307, 1301, 938]#, 1302, 1306]
 	fits, losses = form_fits(inds)
 	param_fits(t, data, fits, inds, names, "./param_fits.pdf")
 	print("Losses = $(losses)\n");
@@ -104,6 +106,12 @@ function main()
 	inds = partialsortperm(LL, 1:5);
 	fits, losses = form_fits(inds)
 	param_fits(t, data, fits, inds, inds, "./param_fits3.pdf")
+	print("Losses = $(losses)\n");
+	
+	names= ["Barone 𝑒𝑡 𝑎𝑙."]
+	inds = [1019]
+	fits, losses = form_fits(inds)
+	param_fits(t, data, fits, inds, names, "./param_fit.pdf")
 	print("Losses = $(losses)\n");
 	
 	return nothing

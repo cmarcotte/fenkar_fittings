@@ -1,6 +1,6 @@
 const Nt = 500
 
-include("dataManagement.jl"); include("plotting.jl"); include("fitting.jl")
+include("dataManagement.jl"); include("plotting.jl"); include("fitting.jl");
 using .dataManagement, .plotting, .fitting
 
 const dt = 2.0				# time between samples -- set by the data
@@ -16,14 +16,16 @@ const LL, PP = knownFits(Nt; truncate=true);
 
 using Optimization, OptimizationNLopt
 
+global iter = Int(0)
 cb = function (θ,l,sol) # callback function to observe training
-    global iter = iter + 1;
+    	global iter = iter + 1;
+	if mod(iter,1000) == 0
+		print("Iter = $(iter), \tLoss = $(round(l;digits=fitting.sigdigs)).\n");
+	end
 	if isinf(l) || isnothing(l)
 		return true
-	elseif mod(iter,1000) == 0
-		print("Iter = $(iter), \tLoss = $(round(l;digits=sigdigs)).\n");
 	end
-    return false
+    	return false
 end
 
 function globalOptiz(;opts=[NLopt.GN_DIRECT_L(), NLopt.GN_CRS2_LM(), NLopt.GD_STOGO(), NLopt.GN_AGS(), NLopt.GN_ISRES(), NLopt.GN_ESCH()])

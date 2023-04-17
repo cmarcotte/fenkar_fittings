@@ -3,7 +3,7 @@ module fitting
 include("model.jl")
 using .fenkar, OrdinaryDiffEq, Random, ForwardDiff, Optimization, OptimizationNLopt, DelimitedFiles
 
-export cb, deflationOperator, model, loss, optimizeParams, parametersAndBounds
+export cb, deflationOperator, model, loss, optimizeParams, parametersAndBounds, checkBoundValidity!
 export ltol
 
 const sigdigs = 10
@@ -24,16 +24,32 @@ function pinStimParams!(P,ub,lb; tol=0.0)
 	lb[inds] .= P[inds].*(1.0 .- sign.(P[inds]).*tol)
 	return nothing
 end
-
+function checkBoundValidity!(P, ub, lb; tol=1.0)
+	# and then check lb/ub are valid
+	li = findall(P .<= lb)
+	if !isempty(li)
+		@debug "$(lb[li]) .> $(P[li])"
+		lb[li] .= P[li].*(1.0 .- sign.(P[li]).*tol)
+	end
+	ui = findall(P .>= ub)
+	if ~isempty(ui)
+		@debug "$(ub[ui]) .< $(P[ui])"
+		ub[ui] .= P[ui].*(1.0 .+ sign.(P[ui]).*tol)
+	end
+	return nothing
+end
 function parametersAndBounds(Nt, Nsols, t0s, BCLs; modelfile=false, stimfile=false)
 	# set up model parameters
 	P = zeros(Float64, 13 + 5*Nsols)
 	lb= zeros(Float64, 13 + 5*Nsols)
 	ub= zeros(Float64, 13 + 5*Nsols)
-	#####			tsi,	tv1m,	tv2m,	tvp,	twm,	twp,	td,		to,		tr,		xk,		uc,		uv,		ucsi
-	P[1:13] .= [	29.0	19.6	1250.0	3.33	41.0	870.0	0.25	12.5	33.3	10.0	0.13	0.04	0.85	][1:13]
+	#####		tsi,	tv1m,	tv2m,	tvp,	twm,	twp,	td,	to,	tr,	xk,	uc,	uv,	ucsi
 	lb[1:13].= [ 	1.0, 	1.0, 	1.0, 	1.0, 	1.0, 	1.0, 	0.05, 	1.0, 	1.0, 	9.0, 	0.10, 	0.01, 	0.10 	][1:13]
 	ub[1:13].= [ 	1000.0, 1000.0, 2000.0, 15.0,	1000.0,	1000.0,	0.50, 	1000.0,	1000.0,	11.0,	0.15,	0.05,	0.90 	][1:13]
+	#P[1:13] .= [	29.0	19.6	1250.0	3.33	41.0	870.0	0.25	12.5	33.3	10.0	0.13	0.04	0.85	][1:13]
+	for n in 1:13
+		P[n] = rand(range(lb[n], ub[n]; length=10^6));
+	end
 	
 	# initialize stimulus parameters with randomly chosen values, adapt lb/ub to fit
 	for m in 1:Nsols
@@ -68,17 +84,7 @@ function parametersAndBounds(Nt, Nsols, t0s, BCLs; modelfile=false, stimfile=fal
 			pinStimParams!(P,ub,lb); # can't freeze both!
 		end
 	end
-	# and then check lb/ub are valid
-	li = findall(P .<= lb)
-	if !isempty(li)
-		@show "$(lb[li]) .> $(P[li])"
-		lb[li] .= P[li].*0.5
-	end
-	ui = findall(P .>= ub)
-	if ~isempty(ui)
-		@show "$(ub[ui]) .< $(P[ui])"
-		ub[ui] .= P[ui].*2.0
-	end
+	checkBoundValidity!(P, ub, lb);
 	
 	return P, lb, ub
 end
@@ -121,17 +127,19 @@ end
 # define loss function
 function loss(θ; u0=rand(Float64,3), tspan=(0.0,1.0), t=[], Nt=1, Nsols=1, target=rand(Float64,1,1,1), M=nothing)
 	sol = fitting.model(θ; u0=u0, tspan=tspan, t=t, Nt=Nt, Nsols=Nsols, target=target)
-	if any((s.retcode != :Success for s in sol))
+	#if any((s.retcode != :Success for s in sol))
+	if any([!SciMLBase.successful_retcode(s) for s in sol])
 		l = Inf
+		print("Inf loss! Error in test?")
 	elseif size(Array(sol)) != size(target[:,:,1:Nsols])
-		print("I'm a doodoohead poopface") 
+		print("Solution does not match target size!") 
 	else
 		l = sum(abs2, (target[:,:,1:Nsols].-Array(sol))) * M(θ[1:13])/(Nt*Nsols)
 	end
 	return l,sol
 end
 
-function optimizeParams(P, lb, ub; u0=rand(Float64,3), tspan=(0.0,1.0), t=[], Nt=1, Nsols=1, target=rand(Float64,1,1,1), M=nothing)
+function optimizeParams(P, lb, ub; u0=rand(Float64,3), tspan=(0.0,1.0), t=[], Nt=1, Nsols=1, target=rand(Float64,1,1,1), M=nothing, AD=Optimization.AutoForwardDiff(), method=NLopt.LD_SLSQP())
 	
 	ll(x,p) = loss(x; u0=u0, tspan=tspan, t=t, Nt=Nt, Nsols=Nsols, target=target, M=M)
 	
@@ -141,26 +149,29 @@ function optimizeParams(P, lb, ub; u0=rand(Float64,3), tspan=(0.0,1.0), t=[], Nt
 	# reset iter counter
 	global iter = Int(0)
 	
+	if AD != Optimization.AutoForwardDiff()
+		@warn "Testing of alternating AD schemes indicates they don't work at all!"
+	end
 	# Optimization function:
-	f = OptimizationFunction(ll, Optimization.AutoForwardDiff())
+	f = OptimizationFunction(ll, AD)
 	
 	# Optimization Problem definition:
 	optProb = OptimizationProblem(f, P, p = SciMLBase.NullParameters(), lb=lb, ub=ub);
 	
 	# Optimization:
-	print("\nOptimizing with NLopt.LD_SLSQP():\n")
-	result = solve(optProb, NLopt.LD_SLSQP(); callback=cb, abstol=atol, reltol=rtol, xtol_rel=atol, xtol_abs=rtol, maxiters=5000)
+	print("\nOptimizing with $method and $AD:\n")
+	result = solve(optProb, method; callback=cb, abstol=atol, reltol=rtol, xtol_rel=atol, xtol_abs=rtol, maxiters=5000)
 	
-	if result.minimum >= ltol
+	if result.objective >= ltol
 		
 		# Pin the model parameters to their optimal values:
-		ub[1:13] .= result.u[1:13].*(1.0 .+ sign.(result.u[1:13]).*rtol)
-		lb[1:13] .= result.u[1:13].*(1.0 .- sign.(result.u[1:13]).*rtol)
+		pinModelParams!(result.u, ub, lb; tol=0.0);
 		optProb = OptimizationProblem(f, result.u, p = SciMLBase.NullParameters(), lb=lb, ub=ub);
 		
 		# Optimization:
-		print("\nOptimizing with NLopt.GN_DIRECT_L():\n")
-		result = solve(optProb, NLopt.GN_DIRECT_L(); callback=cb, abstol=atol, reltol=rtol, xtol_rel=atol, xtol_abs=rtol, maxiters=50000-iter)
+		print("\nOptimizing with NLopt.GN_MLSL_LDS() with NLopt.LN_SBPLX():\n")
+		#result = solve(optProb, NLopt.GN_DIRECT_L(); callback=cb, abstol=atol, reltol=rtol, xtol_rel=atol, xtol_abs=rtol, maxiters=50000-iter)
+		result = solve(optProb, NLopt.GN_MLSL_LDS(), local_method = NLopt.LN_SBPLX(); callback=cb, abstol=atol, reltol=rtol, xtol_rel=atol, xtol_abs=rtol, maxiters=50000-iter)
 	end
 	
 	l,sol = ll(result.u, nothing);

@@ -1,5 +1,4 @@
-using DelimitedFiles, StatsBase, TSne, UMAP
-using Plots
+using DelimitedFiles, StatsBase, TSne, UMAP, Plots
 
 const Nt = parse(Int, ARGS[1]);
 
@@ -77,8 +76,8 @@ function main(;truncateModelParams=true)
 		data = data[1:13,:];
 	end
 	
-	#distros(data, LL);
-	#paramCovariance(data, LL);
+	distros(data, LL);
+	paramCovariance(data, LL);
 	
 	dim = 2;
 	neighbors = min(50, length(LL)-1);
